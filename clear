@@ -1,0 +1,18 @@
+[33m446014a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Assignment 5 - Added Delivery System source code
+ .../DeliverySystem.Tests}/DeliveryServiceTests.cs                         | 0
+ .../DeliverySystem.Tests}/DeliverySystem.Tests.csproj                     | 0
+ {DeliverySystem => Asig 5/DeliverySystem}/DeliverySystem.csproj           | 0
+ {DeliverySystem => Asig 5/DeliverySystem}/Program.cs                      | 0
+ README.md => Asig 5/README.md                                             | 0
+ 5 files changed, 0 insertions(+), 0 deletions(-)
+[33m59173eb[m Assignment 5 - Initial project setup
+ DeliverySystem.Tests/DeliveryServiceTests.cs     |  98 [32m++++++++++++++++[m
+ DeliverySystem.Tests/DeliverySystem.Tests.csproj |  18 [32m+++[m
+ DeliverySystem/DeliverySystem.csproj             |   8 [32m++[m
+ DeliverySystem/Program.cs                        | 139 [32m+++++++++++++++++++++++[m
+ README.md                                        |  89 [32m++++++++++++++[m[31m-[m
+ 5 files changed, 350 insertions(+), 2 deletions(-)
+[33m232f1f2[m Initial commit
+ .gitattributes | 2 [32m++[m
+ README.md      | 2 [32m++[m
+ 2 files changed, 4 insertions(+)
