@@ -4,113 +4,117 @@ using System.Linq;
 
 namespace DeliverySystem;
 
-public class DeliveryRequest
+public sealed class DeliveryRequest
 {
     public string CustomerName { get; }
     public double DistanceKm { get; }
 
-    public DeliveryRequest(string customerName, double distanceKm)
+    private DeliveryRequest(string customerName, double distanceKm)
     {
+        CustomerName = customerName;
+        DistanceKm = distanceKm;
+    }
+
+    public static DeliveryRequestResult Create(string? customerName, double distanceKm)
+    {
+        var errors = new List<string>();
+
         if (string.IsNullOrWhiteSpace(customerName))
-            throw new ArgumentException("Customer name cannot be empty.");
+            errors.Add("Customer name cannot be empty.");
 
-        if (distanceKm < 0)
-            throw new ArgumentException("Distance cannot be negative.");
+        if (distanceKm < 0 || distanceKm > 50)
+            errors.Add("Distance must be between 0 and 50 km.");
 
-        CustomerName = customerName;
-        DistanceKm = distanceKm;
+        if (errors.Count > 0)
+            return new InvalidDeliveryRequest(errors);
+
+        return new ValidDeliveryRequest(
+            new DeliveryRequest(customerName!.Trim(), distanceKm));
     }
 }
 
-public class DeliveryQuote
-{
-    public string CustomerName { get; }
-    public double DistanceKm { get; }
-    public decimal Price { get; }
+public abstract record DeliveryRequestResult;
+public sealed record ValidDeliveryRequest(DeliveryRequest Value) : DeliveryRequestResult;
+public sealed record InvalidDeliveryRequest(IReadOnlyList<string> Errors) : DeliveryRequestResult;
 
-    public DeliveryQuote(string customerName, double distanceKm, decimal price)
-    {
-        CustomerName = customerName;
-        DistanceKm = distanceKm;
-        Price = price;
-    }
-}
+public sealed record DeliveryQuote(string CustomerName, double DistanceKm, decimal Price);
 
-public class DeliveryService
+public abstract record DeliveryState;
+public sealed record PendingDelivery(DeliveryRequest Request) : DeliveryState;
+public sealed record QuotedDelivery(DeliveryRequest Request, DeliveryQuote Quote) : DeliveryState;
+public sealed record FailedDelivery(string Reason) : DeliveryState;
+
+public static class DeliveryService
 {
-    // select requests inside the delivery area (up to 50 km).
     public static List<DeliveryRequest> SelectValidRequests(List<DeliveryRequest> requests)
     {
-        if (requests == null)
-            throw new ArgumentNullException(nameof(requests));
-
-        return requests.Where(request => request.DistanceKm <= 50).ToList();
+        ArgumentNullException.ThrowIfNull(requests);
+        return requests.ToList();
     }
 
-    // calculate delivery prices using a policy passed to this method.
     public static List<DeliveryQuote> CalculatePrices(
         List<DeliveryRequest> requests,
         Func<DeliveryRequest, decimal> pricePolicy)
     {
-        if (requests == null)
-            throw new ArgumentNullException(nameof(requests));
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(pricePolicy);
 
-        if (pricePolicy == null)
-            throw new ArgumentNullException(nameof(pricePolicy));
-
-        return requests
-            .Select(request => new DeliveryQuote(
-                request.CustomerName,
-                request.DistanceKm,
-                pricePolicy(request)))
-            .ToList();
+        return requests.Select(request => new DeliveryQuote(
+            request.CustomerName, request.DistanceKm, pricePolicy(request))).ToList();
     }
 
-    // sort the cheapest delivery first.
     public static List<DeliveryQuote> SortByPrice(List<DeliveryQuote> quotes)
     {
-        if (quotes == null)
-            throw new ArgumentNullException(nameof(quotes));
-
+        ArgumentNullException.ThrowIfNull(quotes);
         return quotes.OrderBy(quote => quote.Price).ToList();
     }
 
-    // Run all three stages in order.
     public static List<DeliveryQuote> RunPipeline(
         List<DeliveryRequest> requests,
         Func<DeliveryRequest, decimal> pricePolicy)
     {
-        List<DeliveryRequest> validRequests = SelectValidRequests(requests);
-        List<DeliveryQuote> quotes = CalculatePrices(validRequests, pricePolicy);
-        return SortByPrice(quotes);
+        var validRequests = SelectValidRequests(requests);
+        return SortByPrice(CalculatePrices(validRequests, pricePolicy));
     }
 
-    // Policy 1: standard delivery costs 500 + 100 per kilometre.
-    public static decimal StandardPrice(DeliveryRequest request)
+    public static DeliveryState CalculateQuote(
+        DeliveryState state,
+        Func<DeliveryRequest, decimal> pricePolicy)
     {
-        return 500m + 100m * (decimal)request.DistanceKm;
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(pricePolicy);
+
+        return state switch
+        {
+            PendingDelivery pending => new QuotedDelivery(
+                pending.Request,
+                new DeliveryQuote(
+                    pending.Request.CustomerName,
+                    pending.Request.DistanceKm,
+                    pricePolicy(pending.Request))),
+            QuotedDelivery => new FailedDelivery("This delivery has already been quoted."),
+            FailedDelivery failed => failed,
+            _ => new FailedDelivery("Unknown delivery state.")
+        };
     }
 
-    // Policy 2: express delivery costs 800 + 150 per kilometre.
-    public static decimal ExpressPrice(DeliveryRequest request)
-    {
-        return 800m + 150m * (decimal)request.DistanceKm;
-    }
+    public static decimal StandardPrice(DeliveryRequest request) =>
+        500m + 100m * (decimal)request.DistanceKm;
+
+    public static decimal ExpressPrice(DeliveryRequest request) =>
+        800m + 150m * (decimal)request.DistanceKm;
 }
 
-public class Program
+public static class Program
 {
     public static void Main()
     {
-        List<DeliveryRequest> requests = new List<DeliveryRequest>
-        {
-            new DeliveryRequest("Aruzhan", 2),
-            new DeliveryRequest("Dias", 5),
-            new DeliveryRequest("Ali", 0),
-            new DeliveryRequest("Dana", 3),
-            new DeliveryRequest("Miras", 1),
-            new DeliveryRequest("Outside area", 60)
-        };
+        var requests = new List<DeliveryRequest>();
+        AddRequest("Aruzhan", 2, requests);
+        AddRequest("Dias", 5, requests);
+        AddRequest("Ali", 0, requests);
+        AddRequest("Dana", 3, requests);
+        AddRequest("Miras", 1, requests);
 
         Console.WriteLine("STANDARD DELIVERY:");
         ShowQuotes(DeliveryService.RunPipeline(requests, DeliveryService.StandardPrice));
@@ -120,20 +124,50 @@ public class Program
         ShowQuotes(DeliveryService.RunPipeline(requests, DeliveryService.ExpressPrice));
 
         Console.WriteLine();
-        Console.WriteLine("EMPTY DATASET:");
-        var emptyResult = DeliveryService.RunPipeline(
-            new List<DeliveryRequest>(), DeliveryService.StandardPrice);
-        Console.WriteLine("Quotes found: " + emptyResult.Count);
+        Console.WriteLine("FACTORY REJECTION:");
+        var invalid = DeliveryRequest.Create(" ", -1);
+        Console.WriteLine(invalid switch
+        {
+            ValidDeliveryRequest => "Request accepted.",
+            InvalidDeliveryRequest bad => string.Join(" ", bad.Errors),
+            _ => "Unexpected result."
+        });
+
+        Console.WriteLine();
+        Console.WriteLine("SAFE WORKFLOW:");
+        var creation = DeliveryRequest.Create("Test Customer", 2);
+        if (creation is ValidDeliveryRequest valid)
+        {
+            DeliveryState first = DeliveryService.CalculateQuote(
+                new PendingDelivery(valid.Value), DeliveryService.StandardPrice);
+            Console.WriteLine(first is QuotedDelivery ? "Quote created." : "Quote failed.");
+
+            DeliveryState repeated = DeliveryService.CalculateQuote(
+                first, DeliveryService.StandardPrice);
+            Console.WriteLine(repeated is FailedDelivery failed
+                ? failed.Reason
+                : "Unexpected result.");
+        }
+    }
+
+    private static void AddRequest(string name, double distance, List<DeliveryRequest> requests)
+    {
+        switch (DeliveryRequest.Create(name, distance))
+        {
+            case ValidDeliveryRequest valid:
+                requests.Add(valid.Value);
+                break;
+            case InvalidDeliveryRequest invalid:
+                Console.WriteLine($"Skipped request: {string.Join(", ", invalid.Errors)}");
+                break;
+            default:
+                throw new InvalidOperationException("Unknown factory result.");
+        }
     }
 
     private static void ShowQuotes(List<DeliveryQuote> quotes)
     {
-        foreach (DeliveryQuote quote in quotes)
-        {
-            Console.WriteLine(
-                quote.CustomerName + " | " +
-                quote.DistanceKm + " km | " +
-                quote.Price + " KZT");
-        }
+        foreach (var quote in quotes)
+            Console.WriteLine($"{quote.CustomerName} | {quote.DistanceKm} km | {quote.Price} KZT");
     }
 }
