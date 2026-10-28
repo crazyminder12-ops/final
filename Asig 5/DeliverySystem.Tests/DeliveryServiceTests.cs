@@ -1,134 +1,187 @@
-using System;
-using System.Collections.Generic;
 using DeliverySystem;
 using Xunit;
 
 public class DeliveryServiceTests
 {
     [Fact]
-    public void FactorySuccess_CreatesValidatedRequest()
+    public void CreateRequest_ReturnsSuccessForValidInput()
     {
-        var result = DeliveryRequest.Create(" Customer ", 2);
-        var valid = Assert.IsType<ValidDeliveryRequest>(result);
-        Assert.Equal("Customer", valid.Value.CustomerName);
-        Assert.Equal(2, valid.Value.DistanceKm);
+        var result = DeliveryService.CreateRequest(new("Aruzhan", 2));
+        var success = Assert.IsType<Result<DeliveryRequest, DomainError>.Success>(result);
+        Assert.Equal("Aruzhan", success.Value.CustomerName);
     }
 
     [Fact]
-    public void FactoryRejectsEmptyName()
+    public void CreateRequest_RejectsEmptyCustomer()
     {
-        var result = Assert.IsType<InvalidDeliveryRequest>(DeliveryRequest.Create(" ", 2));
-        Assert.Contains(result.Errors, error => error.Contains("name"));
+        var result = Assert.IsType<Result<DeliveryRequest, DomainError>.Failure>(
+            DeliveryService.CreateRequest(new(" ", 2)));
+        Assert.Equal("INVALID_CUSTOMER", result.Error.Code);
     }
 
     [Fact]
-    public void FactoryRejectsNegativeDistance()
+    public void CreateRequest_RejectsNegativeDistance()
     {
-        var result = Assert.IsType<InvalidDeliveryRequest>(DeliveryRequest.Create("Customer", -1));
-        Assert.Contains(result.Errors, error => error.Contains("Distance"));
+        var result = Assert.IsType<Result<DeliveryRequest, DomainError>.Failure>(
+            DeliveryService.CreateRequest(new("Aruzhan", -1)));
+        Assert.Equal("INVALID_DISTANCE", result.Error.Code);
     }
 
     [Fact]
-    public void FactoryRejectsDistanceAboveMaximum()
+    public void CreateRequest_RejectsDistanceAboveLimit()
     {
-        Assert.IsType<InvalidDeliveryRequest>(DeliveryRequest.Create("Customer", 51));
+        var result = Assert.IsType<Result<DeliveryRequest, DomainError>.Failure>(
+            DeliveryService.CreateRequest(new("Aruzhan", 51)));
+        Assert.Equal("INVALID_DISTANCE", result.Error.Code);
     }
 
     [Fact]
-    public void BoundaryValue_ZeroDistanceCostsBasePrice()
+    public void Lookup_ReturnsSomeWhenCustomerExists()
     {
-        var valid = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Nearby", 0));
-        Assert.Equal(500m, DeliveryService.StandardPrice(valid.Value));
+        var request = new DeliveryRequest("Aruzhan", 2);
+        Assert.Equal(new Option<DeliveryRequest>.Some(request),
+            DeliveryService.FindRequest(new[] { request }, "Aruzhan"));
     }
 
     [Fact]
-    public void BoundaryValue_FiftyKmIsAccepted()
+    public void Lookup_ReturnsNoneWhenCustomerIsMissing()
     {
-        var valid = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Edge", 50));
-        Assert.Equal(5500m, DeliveryService.StandardPrice(valid.Value));
+        Assert.IsType<Option<DeliveryRequest>.None>(
+            DeliveryService.FindRequest(Array.Empty<DeliveryRequest>(), "Nobody"));
     }
 
     [Fact]
-    public void NormalWorkflow_CalculatesAndSortsQuotes()
+    public void ZeroDistanceIsAValidValueNotAbsence()
     {
-        var near = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Near", 1)).Value;
-        var far = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Far", 5)).Value;
-        var result = DeliveryService.RunPipeline(new List<DeliveryRequest> { far, near }, DeliveryService.StandardPrice);
-
-        Assert.Equal(2, result.Count);
-        Assert.Equal("Near", result[0].CustomerName);
-        Assert.Equal(600m, result[0].Price);
-        Assert.Equal(1000m, result[1].Price);
+        var request = new DeliveryRequest("Ali", 0);
+        var lookup = DeliveryService.FindRequest(new[] { request }, "Ali");
+        var success = Assert.IsType<Result<DeliveryRequest, DomainError>.Success>(
+            DeliveryService.RequireRequest(lookup));
+        Assert.Equal(0, success.Value.DistanceKm);
     }
 
     [Fact]
-    public void EmptyDataset_ReturnsNoQuotes()
+    public void RequireRequestConvertsNoneToUsefulFailure()
     {
-        Assert.Empty(DeliveryService.RunPipeline(new List<DeliveryRequest>(), DeliveryService.StandardPrice));
+        var result = Assert.IsType<Result<DeliveryRequest, DomainError>.Failure>(
+            DeliveryService.RequireRequest(new Option<DeliveryRequest>.None()));
+        Assert.Equal("DELIVERY_NOT_FOUND", result.Error.Code);
     }
 
     [Fact]
-    public void TwoPolicies_ReturnDifferentPrices()
+    public void MapTransformsSuccessfulValue()
     {
-        var request = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Customer", 2)).Value;
-        Assert.Equal(700m, DeliveryService.StandardPrice(request));
-        Assert.Equal(1100m, DeliveryService.ExpressPrice(request));
+        var source = new Result<int, string>.Success(5);
+        var mapped = source.Map(x => x * 2);
+        Assert.Equal(10, Assert.IsType<Result<int, string>.Success>(mapped).Value);
     }
 
     [Fact]
-    public void PatternMatching_HandlesBothFactoryCases()
+    public void BindContinuesWithSuccessfulValue()
     {
-        DeliveryRequestResult valid = DeliveryRequest.Create("Customer", 1);
-        DeliveryRequestResult invalid = DeliveryRequest.Create("", 1);
-
-        Assert.Equal("valid", Describe(valid));
-        Assert.Equal("invalid", Describe(invalid));
+        var source = new Result<int, string>.Success(5);
+        var bound = source.Bind(x => new Result<string, string>.Success($"value={x}"));
+        Assert.Equal("value=5", Assert.IsType<Result<string, string>.Success>(bound).Value);
     }
 
     [Fact]
-    public void ValidPendingDelivery_TransitionsToQuoted()
+    public void MapPropagatesFailureWithoutCallingFunction()
     {
-        var request = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Customer", 2)).Value;
-        DeliveryState result = DeliveryService.CalculateQuote(
+        var called = false;
+        var source = new Result<int, string>.Failure("bad");
+        var mapped = source.Map(x => { called = true; return x + 1; });
+        Assert.False(called);
+        Assert.Equal("bad", Assert.IsType<Result<int, string>.Failure>(mapped).Error);
+    }
+
+    [Fact]
+    public void BindPropagatesFailureWithoutCallingFunction()
+    {
+        var called = false;
+        var source = new Result<int, string>.Failure("bad");
+        var bound = source.Bind(x => { called = true; return new Result<int, string>.Success(x); });
+        Assert.False(called);
+        Assert.Equal("bad", Assert.IsType<Result<int, string>.Failure>(bound).Error);
+    }
+
+    [Fact]
+    public void BuildQuoteRunsIntegratedBindAndMapChain()
+    {
+        var request = new DeliveryRequest("Aruzhan", 2);
+        var result = DeliveryService.BuildQuote(new[] { request }, "Aruzhan");
+        var success = Assert.IsType<Result<QuoteSummary, DomainError>.Success>(result);
+        Assert.Equal("Aruzhan | 2 km | 700 KZT", success.Value.Text);
+    }
+
+    [Fact]
+    public void BuildQuoteReturnsFailureForMissingCustomer()
+    {
+        var result = Assert.IsType<Result<QuoteSummary, DomainError>.Failure>(
+            DeliveryService.BuildQuote(Array.Empty<DeliveryRequest>(), "Nobody"));
+        Assert.Equal("DELIVERY_NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public void LoadFromJsonReportsMissingFile()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+        var result = Assert.IsType<Result<List<DeliveryInput>, DomainError>.Failure>(
+            DeliveryService.LoadFromJson(path));
+        Assert.Equal("FILE_NOT_FOUND", result.Error.Code);
+    }
+
+    [Fact]
+    public void LoadFromJsonReportsMalformedContent()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+        try
+        {
+            File.WriteAllText(path, "{ invalid json");
+            var result = Assert.IsType<Result<List<DeliveryInput>, DomainError>.Failure>(
+                DeliveryService.LoadFromJson(path));
+            Assert.Equal("MALFORMED_JSON", result.Error.Code);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void LoadFromJsonReadsValidFile()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+        try
+        {
+            File.WriteAllText(path, """[{"CustomerName":"Ali","DistanceKm":0}]""");
+            var result = Assert.IsType<Result<List<DeliveryInput>, DomainError>.Success>(
+                DeliveryService.LoadFromJson(path));
+            Assert.Single(result.Value);
+            Assert.Equal(0, result.Value[0].DistanceKm);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Assignment6PipelineStillSortsStandardQuotes()
+    {
+        var requests = new[] { new DeliveryRequest("Far", 5), new DeliveryRequest("Near", 1) };
+        var quotes = DeliveryService.RunPipeline(requests, DeliveryService.StandardPrice);
+        Assert.Equal("Near", quotes[0].CustomerName);
+        Assert.Equal(600m, quotes[0].Price);
+    }
+
+    [Fact]
+    public void SafeStateTransitionRejectsRepeatedQuote()
+    {
+        var request = new DeliveryRequest("Customer", 2);
+        DeliveryState quoted = DeliveryService.CalculateQuote(
             new PendingDelivery(request), DeliveryService.StandardPrice);
-
-        var quoted = Assert.IsType<QuotedDelivery>(result);
-        Assert.Equal(700m, quoted.Quote.Price);
+        var repeated = Assert.IsType<FailedDelivery>(
+            DeliveryService.CalculateQuote(quoted, DeliveryService.StandardPrice));
+        Assert.Contains("already", repeated.Reason);
     }
-
-    [Fact]
-    public void MissingPrerequisite_InvalidFactoryResultCannotBecomePending()
-    {
-        var result = DeliveryRequest.Create("", 2);
-        Assert.IsType<InvalidDeliveryRequest>(result);
-        // The invalid case contains errors, not a usable DeliveryRequest payload.
-        Assert.NotEmpty(Assert.IsType<InvalidDeliveryRequest>(result).Errors);
-    }
-
-    [Fact]
-    public void RepeatedQuote_IsRejectedAndOriginalStateIsPreserved()
-    {
-        var request = Assert.IsType<ValidDeliveryRequest>(DeliveryRequest.Create("Customer", 2)).Value;
-        DeliveryState original = new PendingDelivery(request);
-        DeliveryState quoted = DeliveryService.CalculateQuote(original, DeliveryService.StandardPrice);
-        DeliveryState repeated = DeliveryService.CalculateQuote(quoted, DeliveryService.StandardPrice);
-
-        Assert.IsType<PendingDelivery>(original);
-        Assert.IsType<QuotedDelivery>(quoted);
-        Assert.Contains("already", Assert.IsType<FailedDelivery>(repeated).Reason);
-    }
-
-    [Fact]
-    public void NullInputList_IsRejected()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            DeliveryService.SelectValidRequests(null!));
-    }
-
-    private static string Describe(DeliveryRequestResult result) => result switch
-    {
-        ValidDeliveryRequest => "valid",
-        InvalidDeliveryRequest => "invalid",
-        _ => "unknown"
-    };
 }
