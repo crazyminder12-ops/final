@@ -1,5 +1,7 @@
 [
-  { "CustomerName": "Aruzhan", "DistanceKm": 2 },
-  { "CustomerName": "Dias", "DistanceKm": 5 },
-  { "CustomerName": "Ali", "DistanceKm": 0 }
+ {"CustomerName":"Aruzhan","DistanceKm":2,"Category":"Standard"},
+ {"CustomerName":"Ali","DistanceKm":12,"Category":"Express"},
+ {"CustomerName":"Dana","DistanceKm":18,"Category":"Standard"},
+ {"CustomerName":"Ernar","DistanceKm":12,"Category":"Express"},
+ {"CustomerName":"Miras","DistanceKm":4,"Category":"Economy"}
 ]
